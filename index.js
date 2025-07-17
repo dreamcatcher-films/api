@@ -49,6 +49,9 @@ const initializeDatabase = async () => {
           groom_address TEXT,
           locations TEXT,
           schedule TEXT,
+          email VARCHAR(255) NOT NULL,
+          phone_number VARCHAR(255) NOT NULL,
+          additional_info TEXT,
           discount_code VARCHAR(255),
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -125,41 +128,57 @@ app.post('/api/bookings', async (req, res) => {
         groomAddress,
         locations,
         schedule,
+        email,
+        phoneNumber,
+        additionalInfo,
         discountCode
     } = req.body;
 
-    if (!accessKey || !packageName || !totalPrice) {
-        return res.status(400).json({ message: 'Missing required booking information.' });
+    if (!accessKey || !packageName || !totalPrice || !email || !phoneNumber) {
+        return res.status(400).json({ message: 'Missing required booking information, including email and phone number.' });
     }
 
     const query = `
         INSERT INTO bookings (
             access_key, package_name, total_price, selected_items, 
-            wedding_date, bride_address, groom_address, locations, schedule, discount_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            wedding_date, bride_address, groom_address, locations, schedule, 
+            email, phone_number, additional_info, discount_code
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id;
     `;
     
     const values = [
-        accessKey, packageName, totalPrice, JSON.stringify(selectedItems),
-        weddingDate || null, brideAddress || null, groomAddress || null,
-        locations || null, schedule || null, discountCode || null
+        accessKey,
+        packageName,
+        totalPrice,
+        JSON.stringify(selectedItems),
+        weddingDate || null,
+        brideAddress || null,
+        groomAddress || null,
+        locations || null,
+        schedule || null,
+        email,
+        phoneNumber,
+        additionalInfo || null,
+        discountCode || null
     ];
-    
+
     try {
         const result = await pool.query(query, values);
-        const bookingId = result.rows[0].id;
-        console.log(`Successfully created booking with ID: ${bookingId}`);
-        res.status(201).json({ success: true, bookingId });
+        res.status(201).json({ message: 'Booking created successfully.', bookingId: result.rows[0].id });
     } catch (err) {
         console.error('Error creating booking:', err);
-        res.status(500).json({ success: false, message: 'Server error while creating booking.' });
+        res.status(500).json({ message: 'Server error while creating booking.' });
     }
 });
 
 
-// --- Server Start ---
-app.listen(PORT, async () => {
+// --- Start Server ---
+const startServer = async () => {
   await initializeDatabase();
-  console.log(`API server listening on port ${PORT}`);
-});
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+  });
+};
+
+startServer();
