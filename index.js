@@ -58,7 +58,7 @@ const initializeDatabase = async () => {
             await client.query(`
                 CREATE TABLE bookings (
                     id SERIAL PRIMARY KEY,
-                    access_key_used VARCHAR(255) NOT NULL,
+                    access_key VARCHAR(255) NOT NULL,
                     package_name VARCHAR(255),
                     total_price NUMERIC(10, 2),
                     selected_items TEXT[],
@@ -143,7 +143,7 @@ app.post('/api/bookings', async (req, res) => {
     try {
         const query = `
             INSERT INTO bookings (
-                access_key_used, package_name, total_price, selected_items, wedding_date, 
+                access_key, package_name, total_price, selected_items, wedding_date, 
                 bride_address, groom_address, locations, schedule, discount_code
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
