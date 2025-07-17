@@ -1,8 +1,8 @@
 
-require('dotenv').config();
-const express = require('express');
-const { Pool } = require('pg');
-const cors = require('cors');
+import 'dotenv/config';
+import express from 'express';
+import { Pool } from 'pg';
+import cors from 'cors';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -72,7 +72,14 @@ const initializeDatabase = async () => {
 // --- Middleware ---
 const corsOptions = {
   origin: function (origin, callback) {
-    const allowedOrigins = (process.env.CORS_ORIGIN || "").split(',');
+    const allowedOriginsStr = process.env.CORS_ORIGIN;
+    // If CORS_ORIGIN is not set on the server, we will be permissive to ease deployment.
+    // For production environments, this variable should be set to the frontend's URL.
+    if (!allowedOriginsStr) {
+      return callback(null, true);
+    }
+    const allowedOrigins = allowedOriginsStr.split(',');
+    // Allow requests with no origin (e.g., mobile apps, curl) or from an allowed origin.
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
