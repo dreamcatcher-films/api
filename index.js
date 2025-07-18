@@ -632,7 +632,7 @@ app.post('/api/admin/galleries/upload', authenticateAdminToken, async (req, res)
         return res.status(400).json({ message: 'Filename is required.' });
     }
     try {
-        const blob = await put(filename, req.body, {
+        const blob = await put(filename, req, {
           access: 'public',
         });
         res.status(200).json(blob);
