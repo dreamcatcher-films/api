@@ -1,13 +1,10 @@
-
-import 'dotenv/config';
-import express from 'express';
-import { Pool } from 'pg';
-import cors from 'cors';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
+require('dotenv').config();
+const express = require('express');
+const { Pool } = require('pg');
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
-import jwt from 'jsonwebtoken';
-import { put, del } from '@vercel/blob';
+const jwt = require('jsonwebtoken');
+const { put, del } = require('@vercel/blob');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
