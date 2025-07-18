@@ -1,4 +1,5 @@
 
+
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -212,7 +213,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     try {
-        const result = await pool.query('SELECT * FROM bookings WHERE client_id = $1', [clientId]);
+        const result = await pool.query('SELECT * FROM bookings WHERE client_id = $1', [clientId.trim()]);
         if (result.rowCount === 0) {
             return res.status(401).json({ message: 'Nieprawidłowy numer klienta lub hasło.' });
         }
@@ -237,7 +238,7 @@ app.post('/api/login', async (req, res) => {
 
 app.get('/api/my-booking', authenticateToken, async (req, res) => {
     try {
-        const { clientId } = req.user;
+        const { clientId } = req.user.user;
         const result = await pool.query('SELECT * FROM bookings WHERE client_id = $1', [clientId]);
         
         if (result.rowCount === 0) {
