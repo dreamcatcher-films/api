@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -423,6 +415,64 @@ app.patch('/api/admin/bookings/:id', authenticateAdminToken, async (req, res) =>
     } catch (err) {
         console.error(`Błąd podczas aktualizacji rezerwacji (id: ${id}):`, err);
         res.status(500).json({ message: 'Błąd serwera podczas aktualizacji rezerwacji.' });
+    }
+});
+
+app.get('/api/admin/access-keys', authenticateAdminToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM access_keys ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching access keys for admin:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania kluczy dostępu.' });
+    }
+});
+
+app.post('/api/admin/access-keys', authenticateAdminToken, async (req, res) => {
+    const { client_name } = req.body;
+    if (!client_name) {
+        return res.status(400).json({ message: 'Nazwa klienta jest wymagana.' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        let newKey;
+        let isUnique = false;
+        while (!isUnique) {
+            newKey = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const res = await client.query('SELECT id FROM access_keys WHERE key = $1', [newKey]);
+            if (res.rowCount === 0) {
+                isUnique = true;
+            }
+        }
+        
+        const result = await client.query(
+            'INSERT INTO access_keys (key, client_name) VALUES ($1, $2) RETURNING *',
+            [newKey, client_name]
+        );
+        await client.query('COMMIT');
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error creating access key:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas tworzenia klucza dostępu.' });
+    } finally {
+        client.release();
+    }
+});
+
+app.delete('/api/admin/access-keys/:id', authenticateAdminToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM access_keys WHERE id = $1 RETURNING id', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono klucza do usunięcia.' });
+        }
+        res.status(200).json({ message: 'Klucz dostępu został pomyślnie usunięty.' });
+    } catch (err) {
+        console.error(`Error deleting access key (id: ${id}):`, err);
+        res.status(500).json({ message: 'Błąd serwera podczas usuwania klucza dostępu.' });
     }
 });
 
