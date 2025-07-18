@@ -3,7 +3,9 @@ import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
 import cors from 'cors';
-import bcrypt from 'bcryptjs';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const bcrypt = require('bcryptjs');
 import jwt from 'jsonwebtoken';
 
 const app = express();
