@@ -1,3 +1,4 @@
+
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -6,7 +7,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const bcrypt = require('bcryptjs');
 import jwt from 'jsonwebtoken';
-const { put, del } = require('@vercel/blob');
+import { put, del } from '@vercel/blob';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
