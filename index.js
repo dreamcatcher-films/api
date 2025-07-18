@@ -254,6 +254,32 @@ app.get('/api/my-booking', authenticateToken, async (req, res) => {
     }
 });
 
+app.patch('/api/my-booking', authenticateToken, async (req, res) => {
+    try {
+        const { clientId } = req.user.user;
+        const { bride_address, groom_address, locations, schedule } = req.body;
+        
+        const result = await pool.query(
+            `UPDATE bookings 
+             SET bride_address = $1, groom_address = $2, locations = $3, schedule = $4
+             WHERE client_id = $5
+             RETURNING *`,
+            [bride_address, groom_address, locations, schedule, clientId]
+        );
+        
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono rezerwacji do zaktualizowania.' });
+        }
+        
+        const { password_hash, ...updatedBooking } = result.rows[0];
+        res.json({ message: 'Dane zostały pomyślnie zaktualizowane.', booking: updatedBooking });
+
+    } catch (err) {
+        console.error('Error updating booking data:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas aktualizacji danych.' });
+    }
+});
+
 
 // --- Start Server ---
 const startServer = async () => {
