@@ -1,5 +1,6 @@
 
 
+
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -12,6 +13,7 @@ import jwt from 'jsonwebtoken';
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-default-super-secret-key-for-dev';
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'your-default-super-secret-admin-key-for-dev';
 
 // --- Database Pool Configuration ---
 const pool = new Pool({
@@ -81,13 +83,41 @@ const initializeDatabase = async () => {
       );
     `);
     console.log('Successfully created new "bookings" table.');
+    
+    // Create admins table
+     await client.query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('Ensured "admins" table exists.');
 
     // Add a sample key if it doesn't exist for testing
-    const res = await client.query("SELECT * FROM access_keys WHERE key = '1234'");
-    if (res.rowCount === 0) {
+    const resKeys = await client.query("SELECT * FROM access_keys WHERE key = '1234'");
+    if (resKeys.rowCount === 0) {
       await client.query("INSERT INTO access_keys (key, client_name) VALUES ('1234', 'Test Client')");
       console.log('Inserted sample access key "1234".');
     }
+    
+    // Create default admin user if none exists
+    const resAdmins = await client.query("SELECT * FROM admins");
+    if (resAdmins.rowCount === 0) {
+        const adminEmail = 'admin@dreamcatcher.com';
+        const adminPassword = 'admin' + Math.floor(1000 + Math.random() * 9000); // Generate a random password
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(adminPassword, salt);
+        await client.query("INSERT INTO admins (email, password_hash) VALUES ($1, $2)", [adminEmail, passwordHash]);
+        console.log('============================================');
+        console.log('CREATED DEFAULT ADMIN USER:');
+        console.log(`Email: ${adminEmail}`);
+        console.log(`Password: ${adminPassword}`);
+        console.log('Please use these credentials to log in to the admin panel.');
+        console.log('============================================');
+    }
+    
   } catch (err) {
     console.error('Database initialization error!', err.stack);
   } finally {
@@ -131,12 +161,26 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+const authenticateAdminToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token == null) return res.sendStatus(401);
+
+    jwt.verify(token, ADMIN_JWT_SECRET, (err, admin) => {
+        if (err) return res.sendStatus(403);
+        req.admin = admin;
+        next();
+    });
+};
+
 
 // --- API Endpoints ---
 app.get('/', (req, res) => {
   res.send('Dreamcatcher API is running!');
 });
 
+// --- CLIENT Endpoints ---
 app.post('/api/validate-key', async (req, res) => {
   const { key } = req.body;
   if (!key) {
@@ -277,6 +321,37 @@ app.patch('/api/my-booking', authenticateToken, async (req, res) => {
     } catch (err) {
         console.error('Error updating booking data:', err);
         res.status(500).json({ message: 'Błąd serwera podczas aktualizacji danych.' });
+    }
+});
+
+// --- ADMIN Endpoints ---
+app.post('/api/admin/login', async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email i hasło są wymagane.' });
+    }
+    
+    try {
+        const result = await pool.query('SELECT * FROM admins WHERE email = $1', [email]);
+        if (result.rowCount === 0) {
+            return res.status(401).json({ message: 'Nieprawidłowy email lub hasło.' });
+        }
+        
+        const admin = result.rows[0];
+        const isMatch = await bcrypt.compare(password, admin.password_hash);
+        
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Nieprawidłowy email lub hasło.' });
+        }
+        
+        const payload = { admin: { id: admin.id, email: admin.email } };
+        const token = jwt.sign(payload, ADMIN_JWT_SECRET, { expiresIn: '1d' });
+        
+        res.json({ token });
+        
+    } catch(err) {
+        console.error('Admin login error:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas logowania administratora.' });
     }
 });
 
