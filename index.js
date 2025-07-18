@@ -4,6 +4,8 @@
 
 
 
+
+
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -384,6 +386,43 @@ app.get('/api/admin/bookings/:id', authenticateAdminToken, async (req, res) => {
     } catch (err) {
         console.error(`Error fetching booking details for admin (id: ${id}):`, err);
         res.status(500).json({ message: 'Błąd serwera podczas pobierania szczegółów rezerwacji.' });
+    }
+});
+
+app.patch('/api/admin/bookings/:id', authenticateAdminToken, async (req, res) => {
+    const { id } = req.params;
+    const {
+        bride_name, groom_name, email, phone_number, wedding_date,
+        bride_address, groom_address, locations, schedule, additional_info
+    } = req.body;
+
+    if (!bride_name || !groom_name || !email || !phone_number || !wedding_date) {
+        return res.status(400).json({ message: 'Brak wymaganych pól do aktualizacji.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `UPDATE bookings
+             SET bride_name = $1, groom_name = $2, email = $3, phone_number = $4, wedding_date = $5,
+                 bride_address = $6, groom_address = $7, locations = $8, schedule = $9, additional_info = $10
+             WHERE id = $11
+             RETURNING *`,
+            [
+                bride_name, groom_name, email, phone_number, wedding_date,
+                bride_address, groom_address, locations, schedule, additional_info,
+                id
+            ]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono rezerwacji do zaktualizowania.' });
+        }
+
+        const { password_hash, ...updatedBooking } = result.rows[0];
+        res.json({ message: 'Rezerwacja została pomyślnie zaktualizowana.', booking: updatedBooking });
+    } catch (err) {
+        console.error(`Błąd podczas aktualizacji rezerwacji (id: ${id}):`, err);
+        res.status(500).json({ message: 'Błąd serwera podczas aktualizacji rezerwacji.' });
     }
 });
 
