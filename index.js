@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const bcrypt = require('bcryptjs');
 import jwt from 'jsonwebtoken';
+import { put, del } from '@vercel/blob';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -40,7 +41,6 @@ const initializeDatabase = async () => {
   try {
     console.log('Connected to the database. Initializing schema...');
 
-    // Create access_keys table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS access_keys (
         id SERIAL PRIMARY KEY,
@@ -51,7 +51,6 @@ const initializeDatabase = async () => {
     `);
     console.log('Ensured "access_keys" table exists.');
     
-    // Create the new, detailed bookings table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS bookings (
           id SERIAL PRIMARY KEY,
@@ -77,7 +76,6 @@ const initializeDatabase = async () => {
     `);
     console.log('Ensured "bookings" table exists.');
     
-    // Create admins table if it doesn't exist
      await client.query(`
       CREATE TABLE IF NOT EXISTS admins (
         id SERIAL PRIMARY KEY,
@@ -88,7 +86,6 @@ const initializeDatabase = async () => {
     `);
     console.log('Ensured "admins" table exists.');
     
-    // Create availability table if it doesn't exist
     await client.query(`
         CREATE TABLE IF NOT EXISTS availability (
             id SERIAL PRIMARY KEY,
@@ -101,6 +98,17 @@ const initializeDatabase = async () => {
         );
     `);
     console.log('Ensured "availability" table exists.');
+
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS galleries (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            image_url VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+    console.log('Ensured "galleries" table exists.');
 
     // Add a sample key if it doesn't exist for testing
     const resKeys = await client.query("SELECT * FROM access_keys WHERE key = '1234'");
@@ -173,13 +181,10 @@ const initializeDatabase = async () => {
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOriginsStr = process.env.CORS_ORIGIN;
-    // If CORS_ORIGIN is not set on the server, we will be permissive to ease deployment.
-    // For production environments, this variable should be set to the frontend's URL.
     if (!allowedOriginsStr) {
       return callback(null, true);
     }
     const allowedOrigins = allowedOriginsStr.split(',');
-    // Allow requests with no origin (e.g., mobile apps, curl) or from an allowed origin.
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -189,7 +194,7 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase limit for base64 uploads
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -222,6 +227,18 @@ const authenticateAdminToken = (req, res, next) => {
 app.get('/', (req, res) => {
   res.send('Dreamcatcher API is running!');
 });
+
+// --- GALLERY Endpoints (PUBLIC) ---
+app.get('/api/gallery', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM galleries ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching public gallery:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania galerii.' });
+    }
+});
+
 
 // --- CLIENT Endpoints ---
 app.post('/api/validate-key', async (req, res) => {
@@ -604,6 +621,79 @@ app.delete('/api/admin/availability/:id', authenticateAdminToken, async (req, re
     } catch (err) {
         console.error(`Error deleting availability event (id: ${id}):`, err);
         res.status(500).json({ message: 'Błąd serwera podczas usuwania wydarzenia.' });
+    }
+});
+
+
+// --- ADMIN GALLERY ENDPOINTS ---
+app.post('/api/admin/galleries/upload', authenticateAdminToken, async (req, res) => {
+    const { filename } = req.query;
+    if (!filename) {
+        return res.status(400).json({ message: 'Filename is required.' });
+    }
+    try {
+        const blob = await put(filename, req.body, {
+          access: 'public',
+        });
+        res.status(200).json(blob);
+    } catch(err) {
+        console.error('Error uploading file to blob:', err);
+        res.status(500).json({ message: `Error uploading file: ${err.message}` });
+    }
+});
+
+app.get('/api/admin/galleries', authenticateAdminToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM galleries ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching admin gallery:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania galerii.' });
+    }
+});
+
+app.post('/api/admin/galleries', authenticateAdminToken, async (req, res) => {
+    const { title, description, image_url } = req.body;
+    if (!title || !image_url) {
+        return res.status(400).json({ message: 'Title and image URL are required.' });
+    }
+    try {
+        const result = await pool.query(
+            'INSERT INTO galleries (title, description, image_url) VALUES ($1, $2, $3) RETURNING *',
+            [title, description || null, image_url]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch(err) {
+        console.error('Error saving gallery item:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas zapisu do galerii.' });
+    }
+});
+
+app.delete('/api/admin/galleries/:id', authenticateAdminToken, async (req, res) => {
+    const { id } = req.params;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const galleryItemRes = await client.query('SELECT image_url FROM galleries WHERE id = $1', [id]);
+        if (galleryItemRes.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Nie znaleziono elementu galerii.' });
+        }
+        
+        const imageUrl = galleryItemRes.rows[0].image_url;
+        await del(imageUrl);
+        
+        await client.query('DELETE FROM galleries WHERE id = $1', [id]);
+        
+        await client.query('COMMIT');
+        res.status(200).json({ message: 'Element galerii został usunięty.' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`Error deleting gallery item (id: ${id}):`, err);
+        res.status(500).json({ message: 'Błąd serwera podczas usuwania elementu galerii.' });
+    } finally {
+        client.release();
     }
 });
 
