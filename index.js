@@ -3,9 +3,12 @@ import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
 import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-default-super-secret-key-for-dev';
 
 // --- Database Pool Configuration ---
 const pool = new Pool({
@@ -14,6 +17,20 @@ const pool = new Pool({
     rejectUnauthorized: false
   }
 });
+
+// --- Helper Functions ---
+const generateUniqueClientId = async (client) => {
+    let isUnique = false;
+    let clientId;
+    while (!isUnique) {
+        clientId = Math.floor(1000 + Math.random() * 9000).toString();
+        const res = await client.query('SELECT id FROM bookings WHERE client_id = $1', [clientId]);
+        if (res.rowCount === 0) {
+            isUnique = true;
+        }
+    }
+    return clientId;
+};
 
 // --- Database Initialization ---
 const initializeDatabase = async () => {
@@ -40,10 +57,14 @@ const initializeDatabase = async () => {
     await client.query(`
       CREATE TABLE bookings (
           id SERIAL PRIMARY KEY,
+          client_id VARCHAR(4) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
           access_key VARCHAR(255) NOT NULL,
           package_name VARCHAR(255),
           total_price NUMERIC(10, 2),
           selected_items JSONB,
+          bride_name VARCHAR(255),
+          groom_name VARCHAR(255),
           wedding_date DATE,
           bride_address TEXT,
           groom_address TEXT,
@@ -94,6 +115,20 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token == null) return res.sendStatus(401);
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
+        next();
+    });
+};
+
+
 // --- API Endpoints ---
 app.get('/', (req, res) => {
   res.send('Dreamcatcher API is running!');
@@ -119,56 +154,100 @@ app.post('/api/validate-key', async (req, res) => {
 
 app.post('/api/bookings', async (req, res) => {
     const {
-        accessKey,
-        packageName,
-        totalPrice,
-        selectedItems,
-        weddingDate,
-        brideAddress,
-        groomAddress,
-        locations,
-        schedule,
-        email,
-        phoneNumber,
-        additionalInfo,
-        discountCode
+        accessKey, password, packageName, totalPrice, selectedItems,
+        brideName, groomName, weddingDate, brideAddress, groomAddress,
+        locations, schedule, email, phoneNumber, additionalInfo, discountCode
     } = req.body;
 
-    if (!accessKey || !packageName || !totalPrice || !email || !phoneNumber) {
-        return res.status(400).json({ message: 'Missing required booking information, including email and phone number.' });
+    if (!accessKey || !password || !packageName || !totalPrice || !email || !phoneNumber) {
+        return res.status(400).json({ message: 'Missing required booking information.' });
     }
-
-    const query = `
-        INSERT INTO bookings (
-            access_key, package_name, total_price, selected_items, 
-            wedding_date, bride_address, groom_address, locations, schedule, 
-            email, phone_number, additional_info, discount_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        RETURNING id;
-    `;
     
-    const values = [
-        accessKey,
-        packageName,
-        totalPrice,
-        JSON.stringify(selectedItems),
-        weddingDate || null,
-        brideAddress || null,
-        groomAddress || null,
-        locations || null,
-        schedule || null,
-        email,
-        phoneNumber,
-        additionalInfo || null,
-        discountCode || null
-    ];
-
+    const client = await pool.connect();
     try {
-        const result = await pool.query(query, values);
-        res.status(201).json({ message: 'Booking created successfully.', bookingId: result.rows[0].id });
+        await client.query('BEGIN');
+        
+        const clientId = await generateUniqueClientId(client);
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(password, salt);
+
+        const query = `
+            INSERT INTO bookings (
+                client_id, password_hash, access_key, package_name, total_price, selected_items,
+                bride_name, groom_name, wedding_date, bride_address, groom_address, locations, schedule, 
+                email, phone_number, additional_info, discount_code
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            RETURNING id, client_id;
+        `;
+        const values = [
+            clientId, passwordHash, accessKey, packageName, totalPrice, JSON.stringify(selectedItems),
+            brideName, groomName, weddingDate || null, brideAddress || null, groomAddress || null,
+            locations || null, schedule || null, email, phoneNumber, additionalInfo || null, discountCode || null
+        ];
+
+        const result = await client.query(query, values);
+        await client.query('COMMIT');
+
+        res.status(201).json({ 
+            message: 'Booking created successfully.', 
+            bookingId: result.rows[0].id,
+            clientId: result.rows[0].client_id 
+        });
+
     } catch (err) {
+        await client.query('ROLLBACK');
         console.error('Error creating booking:', err);
         res.status(500).json({ message: 'Server error while creating booking.' });
+    } finally {
+        client.release();
+    }
+});
+
+app.post('/api/login', async (req, res) => {
+    const { clientId, password } = req.body;
+    if (!clientId || !password) {
+        return res.status(400).json({ message: 'Numer klienta i hasło są wymagane.' });
+    }
+
+    try {
+        const result = await pool.query('SELECT * FROM bookings WHERE client_id = $1', [clientId]);
+        if (result.rowCount === 0) {
+            return res.status(401).json({ message: 'Nieprawidłowy numer klienta lub hasło.' });
+        }
+
+        const booking = result.rows[0];
+        const isMatch = await bcrypt.compare(password, booking.password_hash);
+
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Nieprawidłowy numer klienta lub hasło.' });
+        }
+
+        const payload = { user: { clientId: booking.client_id } };
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
+
+        res.json({ token });
+
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas logowania.' });
+    }
+});
+
+app.get('/api/my-booking', authenticateToken, async (req, res) => {
+    try {
+        const { clientId } = req.user;
+        const result = await pool.query('SELECT * FROM bookings WHERE client_id = $1', [clientId]);
+        
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono rezerwacji.' });
+        }
+
+        const { password_hash, ...bookingData } = result.rows[0];
+        res.json(bookingData);
+
+    } catch (err) {
+        console.error('Error fetching booking data:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania danych.' });
     }
 });
 
