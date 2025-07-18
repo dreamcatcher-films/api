@@ -40,10 +40,6 @@ const initializeDatabase = async () => {
   try {
     console.log('Connected to the database. Initializing schema...');
 
-    // Drop old bookings table if it exists to ensure clean schema on deploy
-    await client.query('DROP TABLE IF EXISTS bookings;');
-    console.log('Dropped old "bookings" table (if existed).');
-
     // Create access_keys table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS access_keys (
@@ -55,9 +51,9 @@ const initializeDatabase = async () => {
     `);
     console.log('Ensured "access_keys" table exists.');
     
-    // Create the new, detailed bookings table
+    // Create the new, detailed bookings table if it doesn't exist
     await client.query(`
-      CREATE TABLE bookings (
+      CREATE TABLE IF NOT EXISTS bookings (
           id SERIAL PRIMARY KEY,
           client_id VARCHAR(4) UNIQUE NOT NULL,
           password_hash VARCHAR(255) NOT NULL,
@@ -79,9 +75,9 @@ const initializeDatabase = async () => {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('Successfully created new "bookings" table.');
+    console.log('Ensured "bookings" table exists.');
     
-    // Create admins table
+    // Create admins table if it doesn't exist
      await client.query(`
       CREATE TABLE IF NOT EXISTS admins (
         id SERIAL PRIMARY KEY,
@@ -92,7 +88,7 @@ const initializeDatabase = async () => {
     `);
     console.log('Ensured "admins" table exists.');
     
-    // Create availability table
+    // Create availability table if it doesn't exist
     await client.query(`
         CREATE TABLE IF NOT EXISTS availability (
             id SERIAL PRIMARY KEY,
@@ -126,6 +122,42 @@ const initializeDatabase = async () => {
         console.log(`Email: ${adminEmail}`);
         console.log(`Password: ${adminPassword}`);
         console.log('Please use these credentials to log in to the admin panel.');
+        console.log('============================================');
+    }
+
+    // Add a sample booking for testing if it doesn't exist
+    const testClientId = '9999';
+    const resTestBooking = await client.query("SELECT * FROM bookings WHERE client_id = $1", [testClientId]);
+    if (resTestBooking.rowCount === 0) {
+        console.log('Creating a sample booking for testing purposes...');
+        const testPassword = 'password123';
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(testPassword, salt);
+        
+        const query = `
+            INSERT INTO bookings (
+                client_id, password_hash, access_key, package_name, total_price, selected_items,
+                bride_name, groom_name, wedding_date, bride_address, groom_address, locations, schedule, 
+                email, phone_number, additional_info, discount_code
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        `;
+        const values = [
+            testClientId, passwordHash, '1234', 'Pakiet Złoty', 5500.00, 
+            JSON.stringify(["film", "photos", "drone", "pre_wedding"]),
+            'Janina Testowa', 'Krzysztof Przykładowy', '2025-07-26', 
+            'ul. Testowa 1, 00-001 Warszawa', 'ul. Przykładowa 2, 00-002 Kraków',
+            'Kościół: Katedra Polowa WP, Sala: Zamek Ujazdowski', 
+            '14:00 - Ceremonia\n16:00 - Wesele', 
+            'test@example.com', '555-444-333',
+            'Prosimy o ujęcia detali i dużo spontanicznych kadrów.', null
+        ];
+
+        await client.query(query, values);
+        console.log('============================================');
+        console.log('CREATED A TEST BOOKING:');
+        console.log(`Client ID: ${testClientId}`);
+        console.log(`Password: ${testPassword}`);
+        console.log('You can use these credentials to log in to the client panel.');
         console.log('============================================');
     }
     
