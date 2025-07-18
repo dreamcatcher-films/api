@@ -91,6 +91,20 @@ const initializeDatabase = async () => {
       );
     `);
     console.log('Ensured "admins" table exists.');
+    
+    // Create availability table
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS availability (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+            end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+            is_all_day BOOLEAN DEFAULT FALSE,
+            description TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+    console.log('Ensured "availability" table exists.');
 
     // Add a sample key if it doesn't exist for testing
     const resKeys = await client.query("SELECT * FROM access_keys WHERE key = '1234'");
@@ -473,6 +487,91 @@ app.delete('/api/admin/access-keys/:id', authenticateAdminToken, async (req, res
     } catch (err) {
         console.error(`Error deleting access key (id: ${id}):`, err);
         res.status(500).json({ message: 'Błąd serwera podczas usuwania klucza dostępu.' });
+    }
+});
+
+// --- ADMIN AVAILABILITY ENDPOINTS ---
+
+app.get('/api/admin/availability', authenticateAdminToken, async (req, res) => {
+    try {
+        const availabilityRes = await pool.query('SELECT * FROM availability');
+        const bookingsRes = await pool.query('SELECT id, bride_name, groom_name, wedding_date FROM bookings WHERE wedding_date IS NOT NULL');
+
+        const customEvents = availabilityRes.rows.map(e => ({
+            id: e.id,
+            title: e.title,
+            start: new Date(e.start_time),
+            end: new Date(e.end_time),
+            allDay: e.is_all_day,
+            description: e.description,
+            resource: { type: 'event' }
+        }));
+        
+        const bookingEvents = bookingsRes.rows.map(b => ({
+            id: `booking-${b.id}`,
+            title: `Ślub: ${b.bride_name} i ${b.groom_name}`,
+            start: b.wedding_date,
+            end: b.wedding_date,
+            allDay: true,
+            resource: { type: 'booking', bookingId: b.id }
+        }));
+        
+        res.json([...customEvents, ...bookingEvents]);
+    } catch (err) {
+        console.error('Error fetching availability:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania dostępności.' });
+    }
+});
+
+app.post('/api/admin/availability', authenticateAdminToken, async (req, res) => {
+    const { title, start_time, end_time, is_all_day, description } = req.body;
+    if (!title || !start_time || !end_time) {
+        return res.status(400).json({ message: 'Tytuł, początek i koniec wydarzenia są wymagane.' });
+    }
+    try {
+        const result = await pool.query(
+            'INSERT INTO availability (title, start_time, end_time, is_all_day, description) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [title, start_time, end_time, !!is_all_day, description || null]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Error creating availability event:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas tworzenia wydarzenia.' });
+    }
+});
+
+app.patch('/api/admin/availability/:id', authenticateAdminToken, async (req, res) => {
+    const { id } = req.params;
+    const { title, start_time, end_time, is_all_day, description } = req.body;
+    if (!title || !start_time || !end_time) {
+        return res.status(400).json({ message: 'Tytuł, początek i koniec wydarzenia są wymagane.' });
+    }
+    try {
+        const result = await pool.query(
+            'UPDATE availability SET title = $1, start_time = $2, end_time = $3, is_all_day = $4, description = $5 WHERE id = $6 RETURNING *',
+            [title, start_time, end_time, !!is_all_day, description || null, id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono wydarzenia do zaktualizowania.' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(`Error updating availability event (id: ${id}):`, err);
+        res.status(500).json({ message: 'Błąd serwera podczas aktualizacji wydarzenia.' });
+    }
+});
+
+app.delete('/api/admin/availability/:id', authenticateAdminToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM availability WHERE id = $1 RETURNING id', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono wydarzenia do usunięcia.' });
+        }
+        res.status(200).json({ message: 'Wydarzenie zostało pomyślnie usunięte.' });
+    } catch (err) {
+        console.error(`Error deleting availability event (id: ${id}):`, err);
+        res.status(500).json({ message: 'Błąd serwera podczas usuwania wydarzenia.' });
     }
 });
 
