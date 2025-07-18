@@ -1,6 +1,7 @@
 
 
 
+
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -352,6 +353,20 @@ app.post('/api/admin/login', async (req, res) => {
     } catch(err) {
         console.error('Admin login error:', err);
         res.status(500).json({ message: 'Błąd serwera podczas logowania administratora.' });
+    }
+});
+
+app.get('/api/admin/bookings', authenticateAdminToken, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT id, client_id, bride_name, groom_name, wedding_date, total_price, created_at 
+             FROM bookings 
+             ORDER BY created_at DESC`
+        );
+        res.json(result.rows);
+    } catch(err) {
+        console.error('Error fetching bookings for admin:', err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania rezerwacji.' });
     }
 });
 
