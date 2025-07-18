@@ -2,6 +2,8 @@
 
 
 
+
+
 import 'dotenv/config';
 import express from 'express';
 import { Pool } from 'pg';
@@ -367,6 +369,21 @@ app.get('/api/admin/bookings', authenticateAdminToken, async (req, res) => {
     } catch(err) {
         console.error('Error fetching bookings for admin:', err);
         res.status(500).json({ message: 'Błąd serwera podczas pobierania rezerwacji.' });
+    }
+});
+
+app.get('/api/admin/bookings/:id', authenticateAdminToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('SELECT * FROM bookings WHERE id = $1', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Nie znaleziono rezerwacji.' });
+        }
+        const { password_hash, ...bookingData } = result.rows[0];
+        res.json(bookingData);
+    } catch (err) {
+        console.error(`Error fetching booking details for admin (id: ${id}):`, err);
+        res.status(500).json({ message: 'Błąd serwera podczas pobierania szczegółów rezerwacji.' });
     }
 });
 
